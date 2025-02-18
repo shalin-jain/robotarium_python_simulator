@@ -23,16 +23,12 @@ class WrappedRobotarium(object):
     def move(self, pose):
         goals = jnp.array([[-10, 0.], [10, -0.]]).T
         dxu = self.controller(pose, goals)
-        # dxu = jnp.array([[1, 0], [1, 0]]).T
         dxu_safe = self.barrier_fn(dxu, pose, [])
-        print(dxu_safe.shape)
         return dxu_safe
 
     def batched_step(self, poses, unused):
         actions = vmap(self.move, in_axes=(0))(poses)
-        print(actions.shape)
         new_poses = jax.vmap(self.env.batch_step, in_axes=(0, 0))(poses, actions)
-        # print(new_poses.shape)
         return new_poses, new_poses
 
 @partial(jax.jit, static_argnames=('num_envs', 'num_t'))
@@ -40,7 +36,6 @@ def drive_straight_jax(num_envs, num_t):
     env = Robotarium(number_of_robots=2)
     wrapped_env = WrappedRobotarium(env, num_envs)
     initial_poses = jnp.stack([jnp.array([[10., -5, 0.0], [-10., -5, 0]]).T for _ in range(num_envs)], axis=0)
-    # print(initial_poses.shape)
     final_poses, batch = jax.lax.scan(wrapped_env.batched_step, initial_poses, None, num_t)
     return batch
 
@@ -48,7 +43,6 @@ if __name__ == "__main__":
     num_envs = 10
     num_t = 300
     batch = jax.block_until_ready(drive_straight_jax(num_envs, num_t))
-    # print(batch.shape)
 
     # Select one environment to plot
     env_index = 0
@@ -58,7 +52,6 @@ if __name__ == "__main__":
     y_positions_robot_1 = np.array(batch[:, env_index, 1, 0])
     x_positions_robot_2 = np.array(batch[:, env_index, 0, 1])
     y_positions_robot_2 = np.array(batch[:, env_index, 1, 1])
-    # print(x_positions_robot_1)
 
     def check_safety_violation(x1, y1, x2, y2, safety_radius):
         # Compute squared distance to avoid sqrt computation
@@ -66,7 +59,7 @@ if __name__ == "__main__":
         return squared_distance < safety_radius ** 2  # Element-wise comparison
 
     # Define the safety radius
-    safety_radius = 0.12  # Adjust as needed
+    safety_radius = 0.12 
 
     # Compute safety violations over time
     violations = check_safety_violation(
@@ -77,23 +70,10 @@ if __name__ == "__main__":
 
     # Find timesteps where safety is violated
     violated_timesteps = jnp.where(violations)[0]
-
     if violated_timesteps.size > 0:
         print(f"Safety violation occurred at timesteps: {violated_timesteps}")
     else:
         print("No safety violations detected.")
-
-
-    # Plot x and y positions for both robots
-    # plt.figure(figsize=(5, 5))
-    # plt.plot(x_positions_robot_1, y_positions_robot_1, label='Robot 1', color='blue')
-    # plt.plot(x_positions_robot_2, y_positions_robot_2, label='Robot 2', color='red')
-    # plt.xlabel('X Position')
-    # plt.ylabel('Y Position')
-    # plt.title(f'Trajectories of both robots in environment {env_index} over time')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
 
     import numpy as np
     import matplotlib.pyplot as plt
