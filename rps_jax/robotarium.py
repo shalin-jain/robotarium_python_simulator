@@ -83,8 +83,8 @@ class Robotarium(RobotariumABC):
         # assert(self._called_step_already), "Must call get_poses() before calling step()."
 
         # # allow get_poses to be called again
-        # self._called_step_already = True
-        # self._checked_poses_already = False
+        self._called_step_already = True
+        self._checked_poses_already = False
 
         # # validate before thresholding velocities
         # self._errors = self._validate()
