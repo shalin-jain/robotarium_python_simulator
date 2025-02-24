@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jaxopt import BoxOSQP
+from jaxopt import BoxCDQP
 # jax.config.update("jax_enable_x64", True)
 
 def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_vel_limit=12.5, base_length=0.105, wheel_radius=0.016,
@@ -48,7 +48,7 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
         disturb = jnp.array([[-d, -d, d, d],[-d, d, d, -d]])
         
         # initialize QP Solver
-        qp_solver = BoxOSQP(tol=1e-6, maxiter=100)
+        qp_solver = BoxCDQP(tol=1e-6, maxiter=500)
 
         num_robots = dxu.shape[1]
         num_obstacles = obstacles.shape[1] if obstacles else 0
@@ -126,14 +126,14 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
 
         # initialize objective 1/2*x^TQx + cx
         L_all = jnp.kron(jnp.eye(num_robots), L)
-        dxu = jnp.linalg.inv(D) @ dxu
-        v_hat = jnp.reshape(dxu ,(2*num_robots,1), order='F')
+        dxdd = jnp.linalg.inv(D) @ dxu
+        v_hat = jnp.reshape(dxdd ,(2*num_robots,1), order='F')
         Q = 2 * L_all.T @ L_all
         c = 2 * (v_hat.T @ L_all.T @ L_all)
 
         # solve QP
-        qp_solution = qp_solver.run(params_obj=(Q, -c.squeeze()), params_eq=(A[:, 0:2*num_robots]), params_ineq=(b.squeeze(), jnp.inf))
-        vnew, _ = qp_solution.params.primal
+        qp_solution = qp_solver.run(v_hat.squeeze(), params_obj=(Q, -c.squeeze()), params_ineq=(b.squeeze(), jnp.full(b.squeeze().shape, jnp.inf)))
+        vnew = qp_solution.params
         dxu_new = D @ vnew.reshape((2, num_robots), order='F')
 
         return dxu_new

@@ -14,14 +14,14 @@ class WrappedRobotarium(object):
     def __init__(self, env, num_envs):
         self.env = env
         self.num_envs = num_envs
-        self.barrier_fn = create_robust_barriers()
+        self.barrier_fn = create_robust_barriers(safety_radius=0.30)
         self.controller = create_clf_unicycle_position_controller()
     
     def wrapped_step(self):
         return self.env.step()
     
     def move(self, pose):
-        goals = jnp.array([[-10, 0.], [10, -0.]]).T
+        goals = jnp.array([[-1, 0.], [1, -0.]]).T
         dxu = self.controller(pose, goals)
         dxu_safe = self.barrier_fn(dxu, pose, [])
         return dxu_safe
@@ -35,7 +35,7 @@ class WrappedRobotarium(object):
 def drive_straight_jax(num_envs, num_t):
     env = Robotarium(number_of_robots=2)
     wrapped_env = WrappedRobotarium(env, num_envs)
-    initial_poses = jnp.stack([jnp.array([[10., -5, 0.0], [-10., -5, 0]]).T for _ in range(num_envs)], axis=0)
+    initial_poses = jnp.stack([jnp.array([[1., -0.5, 0.0], [-1., -0.5, 0]]).T for _ in range(num_envs)], axis=0)
     final_poses, batch = jax.lax.scan(wrapped_env.batched_step, initial_poses, None, num_t)
     return batch
 
@@ -88,8 +88,8 @@ if __name__ == "__main__":
 
     # Setup plot
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.set_xlim(np.min(x_positions_robot_1) - 5, np.max(x_positions_robot_1) + 5)
-    ax.set_ylim(np.min(y_positions_robot_1) - 5, np.max(y_positions_robot_1) + 5)
+    ax.set_xlim(np.min(x_positions_robot_1) - 0.5, np.max(x_positions_robot_1) + 0.5)
+    ax.set_ylim(np.min(y_positions_robot_1) - 0.5, np.max(y_positions_robot_1) + 0.5)
     ax.set_xlabel('X Position')
     ax.set_ylabel('Y Position')
     ax.set_title(f'(Env {env_index})')

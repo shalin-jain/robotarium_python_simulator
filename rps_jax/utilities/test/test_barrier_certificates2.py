@@ -1,10 +1,9 @@
 import unittest
-import jax
 import jax.numpy as jnp
 import numpy as np
 from rps_jax.utilities.barrier_certificates2 import create_robust_barriers
-from rps.utilities.barrier_certificates2 import create_robust_barriers as create_robust_barriers_py
-jax.config.update("jax_enable_x64", True)
+# from rps.utilities.barrier_certificates2 import create_robust_barriers as create_robust_barriers_py
+# jax.config.update("jax_enable_x64", True)
 
 class TestRobustBarriers(unittest.TestCase):
     """unit tests for test_barrier_certificates2.py"""
