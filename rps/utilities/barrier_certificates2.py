@@ -15,7 +15,7 @@ def create_robust_barriers(max_num_obstacles = 100, max_num_robots = 30, d = 5, 
     D = np.matrix([[wheel_radius/2, wheel_radius/2], [-wheel_radius/base_length, wheel_radius/base_length]])
     
     # L: Maps wheel velocities to the rate of change of the robot's projected position (used in barrier function derivative)
-    L = np.matrix([[1, 1],[0,projection_distance]])* D
+    L = np.matrix([[1, 0],[0,projection_distance]])* D
     
     # disturb: Defines the set of disturbances (Ψ) as a convex hull
     disturb = np.matrix([[-d, -d, d, d],[-d, d, d, -d]])
@@ -157,7 +157,7 @@ def create_robust_barriers(max_num_obstacles = 100, max_num_robots = 30, d = 5, 
         # ---End of QP Formulation Comments---
         
         # Solve QP program: This minimizes the difference between the nominal control and the CBF-safe control while satisfying constraints.
-        vnew = solver2.solve_qp(H, -np.squeeze(np.array(f)), A[0:count,0:2*num_robots].T, np.squeeze(np.array(b[0:count])))
+        vnew = solver2.solve_qp(H, -np.squeeze(np.array(f)), A[0:count,0:2*num_robots].T, np.squeeze(np.array(b[0:count])))[0]
 
         # Reshape vnew to usable velocity command
         dxu = np.reshape(vnew, (2, num_robots), order='F')

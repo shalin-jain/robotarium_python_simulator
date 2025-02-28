@@ -39,7 +39,7 @@ class RobotariumABC(ABC):
 
         if self.initial_conditions.size == 0:
             key = jax.random.PRNGKey(0)
-            self.poses = misc.generate_initial_conditions(key, self.number_of_robots, spacing=0.2, width=2.5, height=1.5)
+            self.poses = misc.generate_initial_conditions(self.number_of_robots, spacing=0.2, width=2.5, height=1.5, key=key)
 
     def set_velocities(self, ids, velocities):
         """Set velocities for the robots."""
@@ -66,7 +66,7 @@ class RobotariumABC(ABC):
         """
         
         dxdd = self._uni_to_diff(dxu)
-        dxdd = jnp.clip(dxdd)
+        dxdd = jnp.clip(dxdd, -self.max_wheel_velocity, self.max_wheel_velocity)
         return self._diff_to_uni(dxdd)
     
     def _uni_to_diff(self, dxu: jnp.ndarray) -> jnp.ndarray:

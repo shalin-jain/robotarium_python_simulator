@@ -26,7 +26,7 @@ class TestRobotariumABC(unittest.TestCase):
         robotarium = RobotariumTest(number_of_robots=1)
 
         # unthresholded
-        dxu = jnp.array([[10], [10]])
+        dxu = jnp.array([[0.1], [1]])
         dxu_thresholded = robotarium._threshold(dxu)
         self.assertEqual(dxu_thresholded.shape, (2, 1))
         self.assertTrue(jnp.all(dxu_thresholded == dxu))

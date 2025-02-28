@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-def generate_initial_conditions(key, N, spacing=0.3, width=3.0, height=1.8) -> jnp.ndarray:
+def generate_initial_conditions(N, spacing=0.3, width=3.0, height=1.8, key=jax.random.PRNGKey(0)) -> jnp.ndarray:
     """
     Generates random initial conditions in an area of the specified
     width and height at the required spacing.
