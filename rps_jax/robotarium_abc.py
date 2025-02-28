@@ -66,7 +66,7 @@ class RobotariumABC(ABC):
         """
         
         dxdd = self._uni_to_diff(dxu)
-        dxdd = jnp.clip(dxdd)
+        dxdd = jnp.clip(dxdd, -self.max_wheel_velocity, self.max_wheel_velocity)
         return self._diff_to_uni(dxdd)
     
     def _uni_to_diff(self, dxu: jnp.ndarray) -> jnp.ndarray:
