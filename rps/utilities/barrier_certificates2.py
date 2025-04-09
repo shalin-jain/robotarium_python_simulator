@@ -4,7 +4,7 @@ import numpy as np
 import time
 
 solvers.options['show_progress'] = False
-solvers.options['reltol'] = 1e-2 
+solvers.options['reltol'] = 1e-2
 solvers.options['feastol'] = 1e-2
 solvers.options['maxiters'] = 50 
 
