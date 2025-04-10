@@ -7,6 +7,7 @@ from rps_jax.utilities.barrier_certificates2 import create_robust_barriers as cr
 from rps_jax.utilities.controllers import create_clf_unicycle_pose_controller as clf_uni_pose_jax, create_clf_unicycle_position_controller as clf_uni_position_jax
 
 from functools import partial
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -14,7 +15,9 @@ import numpy as np
 import pickle
 import jax.numpy as jnp
 import random
+import time
 import timeit
+import os
 
 np.random.seed(0)
 random.seed(0)
@@ -26,18 +29,11 @@ SAFETY_RADIUS = 0.2
 CONTROLLERS = ['clf_uni_position', 'clf_uni_pose']
 BARRIERS = [None, 'robust']
 SIMULATORS = ['python', 'jax']
+NUM_ENVS = [1, 5, 10]
 NUM_AGENTS = 4
 NUM_TIMESTEPS = 10_000
 NUM_TRIALS = 30
 WAYPOINTS_PER_AGENT = 50
-
-def create_no_barrier():
-    def no_barrier(dxu, x, unused):
-        """
-        No-op barrier function, just returns the input action.
-        """
-        return dxu
-    return no_barrier
 
 class ControllerJax:
     def __init__(
@@ -62,7 +58,7 @@ class ControllerJax:
             controller = clf_uni_pose_jax()
 
         if barrier_fn is None:
-            barrier_fn = create_no_barrier()
+            barrier_fn = lambda dxu, x, unused: dxu
         else:
             barrier_fn = create_robust_barriers_jax(safety_radius=0.2)
 
@@ -162,34 +158,28 @@ class WrappedRobotariumJax(object):
         return goals
 
     def batched_step_pose(self, step_state, unused):
-        poses, prev_goals, waypoints_reached = step_state
+        poses, goals = step_state
 
         # update waypoints
-        goals = self.update_goals(poses, prev_goals)
-
-        # update count of waypoints reached per agent if goals != prev_goals
-        waypoints_reached = jnp.where(goals != prev_goals, waypoints_reached + 1, waypoints_reached)
+        goals = self.update_goals(poses, goals)
         goal_poses = jnp.array([self.waypoints[i, goals[i], :] for i in range(self.num_agents)]).T
 
         actions = self.controller.get_action(poses, goal_poses)
         new_poses = self.env.batch_step(poses, actions)
 
-        return (new_poses, goals, waypoints_reached), new_poses
+        return (new_poses, goals), new_poses
     
     def batched_step(self, step_state, unused):
-        poses, prev_goals, waypoints_reached = step_state
+        poses, goals = step_state
 
         # update waypoints
-        goals = self.update_goals(poses, prev_goals)
-
-        # update count of waypoints reached per agent if goals != prev_goals
-        waypoints_reached = jnp.where(goals != prev_goals, waypoints_reached + 1, waypoints_reached)
+        goals = self.update_goals(poses, goals)
         goal_poses = jnp.array([self.waypoints[i, goals[i], :] for i in range(self.num_agents)]).T
 
         actions = self.controller.get_action(poses, goal_poses[:2, :])
         new_poses = self.env.batch_step(poses, actions)
 
-        return (new_poses, goals, waypoints_reached), new_poses
+        return (new_poses, goals), new_poses
 
 
 class WrappedRobotarium(object):
@@ -222,14 +212,11 @@ class WrappedRobotarium(object):
 
         return goals
 
-    def step_pose(self, step_state, unused):
-        poses, prev_goals, waypoints_reached = step_state
+    def batched_step_pose(self, step_state, unused):
+        poses, goals = step_state
 
         # update waypoints
-        goals = self.update_goals(poses, prev_goals)
-
-        # update count of waypoints reached per agent if goals != prev_goals
-        waypoints_reached = np.where(goals != prev_goals, waypoints_reached + 1, waypoints_reached)
+        goals = self.update_goals(poses, goals)
         goal_poses = np.array([self.waypoints[i, goals[i], :] for i in range(self.num_agents)]).T
 
         dxu = np.array(self.controller.get_action(poses, goal_poses))
@@ -237,17 +224,13 @@ class WrappedRobotarium(object):
         self.env.step()
         new_poses = self.env.get_poses()
 
-        return (new_poses, goals, waypoints_reached), new_poses
+        return (new_poses, goals), new_poses
 
-    def step(self, step_state, unused):
-        poses, prev_goals, waypoints_reached = step_state
+    def batched_step(self, step_state, unused):
+        poses, goals = step_state
 
         # update waypoints
-        goals = self.update_goals(poses, prev_goals)
-
-        # update count of waypoints reached per agent if goals != prev_goals
-        waypoints_reached = np.where(goals != prev_goals, waypoints_reached + 1, waypoints_reached)
-
+        goals = self.update_goals(poses, goals)
         goal_poses = np.array([self.waypoints[i, goals[i], :] for i in range(self.num_agents)]).T
 
         dxu = np.array(self.controller.get_action(poses, goal_poses[:2, :]))
@@ -255,7 +238,7 @@ class WrappedRobotarium(object):
         self.env.step()
         new_poses = self.env.get_poses()
 
-        return (new_poses, goals, waypoints_reached), new_poses
+        return (new_poses, goals), new_poses
 
 @partial(jax.jit, static_argnames=('num_agents', 'num_envs', 'num_t', 'controller_fn', 'barrier_fn'))
 def move_random_jax(
@@ -269,9 +252,13 @@ def move_random_jax(
     wrapped_env = WrappedRobotariumJax(num_agents, num_envs, waypoints, controller_fn, barrier_fn)
     initial_poses = waypoints[jnp.arange(num_agents), 0, :].T
     initial_goals = jnp.ones((num_agents,), dtype=jnp.int32)
-    waypoints_reached = np.zeros((num_agents,), dtype=np.int32)
+    initial_poses = jnp.array([initial_poses for _ in range(num_envs)])
+    initial_goals = jnp.array([initial_goals for _ in range(num_envs)])
     step_fn = wrapped_env.batched_step_pose if controller_fn == 'clf_uni_pose' else wrapped_env.batched_step
-    step_state, batch = jax.lax.scan(step_fn, (initial_poses, initial_goals, waypoints_reached), None, num_t)
+    # Use jax.vmap to vectorize the step function over the number of environments
+    step_fn = jax.vmap(step_fn, in_axes=(0, None), out_axes=(0, 0))
+    # Use jax.lax.scan to iterate over the number of timesteps
+    step_state, batch = jax.lax.scan(step_fn, (initial_poses, initial_goals), None, num_t)
 
     return step_state, batch
 
@@ -289,15 +276,35 @@ def move_random(
     poses = wrapped_env.env.get_poses()
     goals = initial_goals
     batch = np.zeros((num_t, 3, num_agents))
-    waypoints_reached = np.zeros((num_agents,), dtype=np.int32)
-    step_fn = wrapped_env.step_pose if controller_fn == 'clf_uni_pose' else wrapped_env.step
+    step_fn = wrapped_env.batched_step_pose if controller_fn == 'clf_uni_pose' else wrapped_env.batched_step
     for i in range(num_t):
-        step_state, _ = step_fn((poses, goals, waypoints_reached), None)
-        poses, goals, waypoints_reached = step_state
+        step_state, _ = step_fn((poses, goals), None)
+        poses, goals = step_state
         batch[i, ...] = poses
     batch = np.array(batch)
+
+    # del wrapped_env
  
     return step_state, batch
+
+def parallel_move_random(
+    num_agents,
+    num_envs,
+    num_t,
+    waypoints,
+    controller_fn,
+    barrier_fn,
+):
+    results = []
+    with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        futures = [
+            executor.submit(move_random, num_agents, num_envs, num_t, waypoints, controller_fn, barrier_fn)
+            for i in range(num_envs)
+        ]
+        for future in as_completed(futures):
+            step_state, batch = future.result()
+            results.append((step_state, batch))
+    return results
 
 def generate_waypoints(num_agents, num_waypoints, min_distance=0.5, max_tries=1000):
     waypoints = np.zeros((num_agents, num_waypoints, 3))
@@ -336,29 +343,6 @@ def generate_waypoints(num_agents, num_waypoints, min_distance=0.5, max_tries=10
 
     return np.array(waypoints)
 
-def compute_trajectory_error(gt_batch, test_batch, pose_sensitive=False):
-    assert(gt_batch.shape == test_batch.shape)
-
-    # Position error (Euclidean distance in x, y)
-    pos_err = np.linalg.norm(gt_batch[..., :2, :] - test_batch[..., :2, :], axis=-2)  # (T, N)
-
-    # Angular error (shortest distance on the circle)
-    angle_diff = gt_batch[..., 2, :] - test_batch[..., 2, :]
-    angle_err = np.abs((angle_diff + np.pi) % (2 * np.pi) - np.pi)  # wrap to [-pi, pi]
-
-    return pos_err.mean(), angle_err.mean() if pose_sensitive else 0.0
-
-def compute_waypoint_mismatch(gt_batch, test_batch):
-    # clip gt_batch to value in test_batch
-    gt_batch = np.where(gt_batch > test_batch, test_batch, gt_batch)
-
-    # set where both elements are 0 to 1
-    temp = gt_batch.copy()
-    gt_batch = np.where(np.logical_and(gt_batch == 0, test_batch == 0), 1, gt_batch)
-    test_batch = np.where(np.logical_and(temp == 0, test_batch == 0), 1, test_batch)
-
-    return 1 - (gt_batch / test_batch)
-
 def benchmark(func, args):
     elapsed_time = timeit.timeit(lambda: func(**args), number=1)
     return elapsed_time
@@ -370,32 +354,23 @@ def benchmark_jax(func, args):
 def run_experiment():
     results = []
     
-    all_conditions = [(s, c, b) for s in SIMULATORS for c in CONTROLLERS for b in BARRIERS]
+    all_conditions = [(s, c, b, n) for s in SIMULATORS for c in CONTROLLERS for b in BARRIERS for n in NUM_ENVS]
 
     for trial in range(NUM_TRIALS+1):
         print(f"Running trial {trial}/{NUM_TRIALS}...")
         random.shuffle(all_conditions)
 
-        for sim_type, controller, barrier in all_conditions:
-            print(f"  Condition: Sim={sim_type}, Ctrl={controller}, Barrier={'Yes' if barrier else 'No'}")
+        for sim_type, controller, barrier, num_envs in all_conditions:
+            print(f"  Condition: Sim={sim_type}, Num Envs={num_envs}")
 
             # Regenerate same waypoints for both sim types for fairness
             waypoints = generate_waypoints(NUM_AGENTS, WAYPOINTS_PER_AGENT)
-
-            # JAX sim
+            
             if sim_type == 'jax':
-                end_state, traj = move_random_jax(
-                    num_agents=NUM_AGENTS,
-                    num_envs=1,
-                    num_t=NUM_TIMESTEPS,
-                    waypoints=jnp.array(waypoints),
-                    controller_fn=controller,
-                    barrier_fn=barrier
-                )
-                args = { \
+                args = {
                     "num_agents": NUM_AGENTS,
-                    "num_envs": 1,
-                    "num_t": NUM_TIMESTEPS,
+                    "num_envs": num_envs,
+                    "num_t": NUM_TIMESTEPS // num_envs,
                     "waypoints": jnp.array(waypoints),
                     "controller_fn": controller,
                     "barrier_fn": barrier
@@ -403,62 +378,33 @@ def run_experiment():
                 wall_time = benchmark_jax(move_random_jax, args)
             # Python sim
             else:
-                end_state, traj = move_random(
-                    num_agents=NUM_AGENTS,
-                    num_envs=1,
-                    num_t=NUM_TIMESTEPS,
-                    waypoints=waypoints,
-                    controller_fn=controller,
-                    barrier_fn=barrier
-                )
-                args = { \
+                args = {
                     "num_agents": NUM_AGENTS,
-                    "num_envs": 1,
-                    "num_t": NUM_TIMESTEPS,
+                    "num_envs": num_envs,
+                    "num_t": NUM_TIMESTEPS // num_envs,
                     "waypoints": np.array(waypoints),
                     "controller_fn": controller,
                     "barrier_fn": barrier
                 }
-                wall_time = benchmark(move_random, args)
+                wall_time = benchmark(parallel_move_random, args)
 
+            # wall_time = end - start
             step_time = wall_time / NUM_TIMESTEPS
-
-            # Compute trajectory error w.r.t. Python simulator as ground truth
-            if sim_type == 'jax':
-                print("    JAX simulation complete, computing error against Python simulation...")
-                # Re-run Python for same waypoints to compute error
-                gt_end_state, gt_traj = move_random(
-                    num_agents=NUM_AGENTS,
-                    num_envs=1,
-                    num_t=NUM_TIMESTEPS,
-                    waypoints=waypoints,
-                    controller_fn=controller,
-                    barrier_fn=barrier
-                )
-                traj_error = compute_trajectory_error(np.array(gt_traj), np.array(traj), pose_sensitive=controller == 'clf_uni_pose')
-                waypoint_mismatch = jnp.mean(compute_waypoint_mismatch(np.array(end_state[-1]), np.array(gt_end_state[-1])))
-            else:
-                waypoint_mismatch = 0
-                traj_error = (0.0, 0.0) # Python is ground truth
-            print(f"    Wall time: {wall_time:.2f}s, Step time: {step_time:.6f}s, Position error: {traj_error[0]:.4f}, Angular error: {traj_error[1]:.4f}")
-
+            print(f"    Wall time: {wall_time:.2f}s, Step time: {step_time:.6f}s, Num Envs: {num_envs}")
+            
+            # throw away first trial to avoide first run bias
             if trial == 0:
                 continue
 
             results.append({
                 'trial': trial,
                 'simulator': sim_type,
-                'controller': controller,
-                'barrier': bool(barrier),
                 'wall_time': wall_time,
                 'step_time': step_time,
-                'trajectory_error': waypoint_mismatch,
-                'position_error': traj_error[0],
-                'angle_error': traj_error[1],
+                'num_envs': num_envs,
             })
 
-
-        with open('jax_sim_faithfulness_results.pkl', 'wb') as f:
+        with open('jax_sim_parallel_results.pkl', 'wb') as f:
             pickle.dump(results, f)
 
     print("All trials complete. Results saved.")
@@ -469,55 +415,49 @@ def print_results_table_human_readable(results):
     """
     # Print header
     print("+" + "-"*12 + "+" + "-"*15 + "+" + "-"*12 + "+" + "-"*20 + "+" + "-"*20 + "+" + "-"*20 + "+")
-    print(f"| {'Barrier':<12} | {'Controller':<15} | {'Simulator':<12} | {'Wall Time (ms)':<20} | {'Step Time (ms)':<20} | {'Trajectory Error':<20} |")
-    print("+" + "-"*12 + "+" + "-"*15 + "+" + "-"*12 + "+" + "-"*20 + "+" + "-"*20 + "+" + "-"*20 + "+")
+    print(f"| {'Num Envs':<12} | {'Simulator':<12} | {'Wall Time (ms)':<20} | {'Step Time (ms)':<20} |")
+    print("+" + "-"*12 + "+" + "-"*15 + "+" + "-"*20 + "+" + "-"*20 + "+")
 
     # Print rows
-    for barrier in [True, False]:
-        barrier_label = "Enabled" if barrier else "Disabled"
-        for controller in CONTROLLERS:
-            for simulator in SIMULATORS:
-                # Filter results for this condition
-                filtered_results = [r for r in results if r['barrier'] == barrier and r['controller'] == controller and r['simulator'] == simulator]
+    for num_envs in NUM_ENVS:
+        for simulator in SIMULATORS:
+            # Filter results for this condition
+            filtered_results = [r for r in results if r['num_envs'] == num_envs and r['simulator'] == simulator]
 
-                if filtered_results:
-                    # Aggregate metrics (average across trials)
-                    wall_time_avg = sum(r['wall_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
-                    step_time_avg = sum(r['step_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
-                    waypoint_error_avg = sum(r['trajectory_error'] for r in filtered_results) / len(filtered_results)
+            if filtered_results:
+                # Aggregate metrics (average across trials)
+                wall_time_avg = sum(r['wall_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
+                step_time_avg = sum(r['step_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
 
-                    # Print row
-                    print(f"| {barrier_label:<12} | {controller[4:]:<15} | {simulator:<12} | {wall_time_avg:<20.2f} | {step_time_avg:<20.6f} | {waypoint_error_avg:<10.4f} |")
+                # Print row
+                print(f"| {num_envs:<12} | {simulator:<12} | {wall_time_avg:<20.2f} | {step_time_avg:<20.6f} |")
     
     # Print footer
-    print("+" + "-"*12 + "+" + "-"*15 + "+" + "-"*12 + "+" + "-"*20 + "+" + "-"*20 + "+" + "-"*20 + "+")
+    print("+" + "-"*12 + "+" + "-"*15 + "+" + "-"*20 + "+" + "-"*20 + "+")
 
 def print_results_table(results):
     """
     Prints the results in a tabular format as specified.
     """
-    print(r"\begin{tabular}{|c|c|c|c|c|c|}")
+    print(r"\begin{tabular}{|c|c|c|c|}")
     print(r"    \hline")
-    print(r"    Barrier Function & Controller & Simulator & Wall Time (ms $\downarrow$) & Step Time (ms $\downarrow$) & Trajectory Error ($\downarrow$) \\")
+    print(r"    Environments & Simulator & Wall Time (ms $\downarrow$) & Step Time (ms $\downarrow$) \\")
     print(r"    \hline")
 
-    for barrier in [True, False]:
-        barrier_label = "Enabled" if barrier else "Disabled"
-        for controller in CONTROLLERS:
-            for simulator in SIMULATORS:
-                # Filter results for this condition
-                filtered_results = [r for r in results if r['barrier'] == barrier and r['controller'] == controller and r['simulator'] == simulator]
+    for num_envs in NUM_ENVS:
+        for simulator in SIMULATORS:
+            # Filter results for this condition
+            filtered_results = [r for r in results if r['num_envs'] == num_envs and r['simulator'] == simulator]
 
-                # Aggregate metrics (average across trials)
-                wall_time_avg = sum(r['wall_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
-                step_time_avg = sum(r['step_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
-                waypoint_error_avg = sum(r['trajectory_error'] for r in filtered_results) / len(filtered_results)
+            # Aggregate metrics (average across trials)
+            wall_time_avg = sum(r['wall_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
+            step_time_avg = sum(r['step_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
 
-                # Print rows for Python and JAX simulators
-                if simulator == "python":
-                    print(f"    {barrier_label} & \\texttt{{{controller.replace("_", "-")}}} & Python & {wall_time_avg:.2f} & {step_time_avg:.6f} & {waypoint_error_avg:.4f} \\\\")
-                elif simulator == "jax":
-                    print(f"        & & Jax & {wall_time_avg:.2f} & {step_time_avg:.6f} & {waypoint_error_avg:.4f} \\\\")
+            # Print rows for Python and JAX simulators
+            if simulator == "python":
+                print(f"    {num_envs} & Python & {wall_time_avg:.2f} & {step_time_avg:.6f} \\")
+            elif simulator == "jax":
+                print(f"        & Jax & {wall_time_avg:.2f} & {step_time_avg:.6f} \\")
     
     print(r"    \hline")
     print(r"\end{tabular}")
@@ -526,7 +466,7 @@ def print_results_table(results):
 if __name__ == "__main__":
     # run_experiment()
     # Load results from file or use directly if already available
-    with open('jax_sim_faithfulness_results.pkl', 'rb') as f:
+    with open('jax_sim_parallel_results.pkl', 'rb') as f:
         results = pickle.load(f)
 
     # Print the summary table

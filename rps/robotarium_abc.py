@@ -73,7 +73,7 @@ class RobotariumABC(ABC):
         self.left_wheel_patches = []
         self.base_patches = []
 
-        self.figure, self.axes = plt.subplots()
+        # self.figure, self.axes = plt.subplots()
         if(self.show_figure):
             self.axes.set_axis_off()
             for i in range(number_of_robots):
@@ -123,9 +123,9 @@ class RobotariumABC(ABC):
             plt.show()
 
             plt.subplots_adjust(left=-0.03, right=1.03, bottom=-0.03, top=1.03, wspace=0, hspace=0)
-        else:
-            self.figure.set_visible(False)
-            plt.draw()
+        # else:
+        #     self.figure.set_visible(False)
+        #     plt.draw()
 
     def set_velocities(self, ids, velocities):
         self.velocities = velocities
