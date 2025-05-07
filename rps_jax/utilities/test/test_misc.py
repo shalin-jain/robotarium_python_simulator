@@ -13,7 +13,7 @@ class TestMisc(unittest.TestCase):
         spacing = 0.3
         width = 3
         height = 1.8
-        poses = generate_initial_conditions(key, N, spacing, width, height)
+        poses = generate_initial_conditions(N, spacing, width, height, key)
         self.assertEqual(poses.shape, (3, N))
         self.assertTrue(jnp.all(poses[0] >= -width/2))
         self.assertTrue(jnp.all(poses[0] <= width/2))

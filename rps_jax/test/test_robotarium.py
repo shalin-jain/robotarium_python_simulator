@@ -17,6 +17,7 @@ class TestRobotariumABC(unittest.TestCase):
     def test_step(self):
         robotarium = Robotarium(number_of_robots=1)
         robotarium.poses = jnp.array([[0, 0, 0]]).T
+        robotarium.get_poses()
         robotarium.set_velocities(jnp.array([0]), jnp.array([[1], [0]]))
         robotarium.step()
         
@@ -25,6 +26,7 @@ class TestRobotariumABC(unittest.TestCase):
         self.assertTrue(robotarium.poses[0, 0] > 0) # check that the robot moved forward
 
         robotarium.poses = jnp.array([[0, 0, 0]]).T
+        robotarium.get_poses()
         robotarium.set_velocities(jnp.array([0]), jnp.array([[0], [1]]))
         robotarium.step()
         self.assertTrue(robotarium.poses[2, 0] > 0) # check that the robot rotated

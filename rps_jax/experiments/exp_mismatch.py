@@ -512,12 +512,13 @@ def print_results_table(results):
                 wall_time_avg = sum(r['wall_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
                 step_time_avg = sum(r['step_time'] for r in filtered_results) / len(filtered_results) * 1000  # Convert to ms
                 waypoint_error_avg = sum(r['trajectory_error'] for r in filtered_results) / len(filtered_results)
+                position_error_avg = sum(r['position_error'] for r in filtered_results) / len(filtered_results)
 
                 # Print rows for Python and JAX simulators
                 if simulator == "python":
-                    print(f"    {barrier_label} & \\texttt{{{controller.replace("_", "-")}}} & Python & {wall_time_avg:.2f} & {step_time_avg:.6f} & {waypoint_error_avg:.4f} \\\\")
+                    print(f"    {barrier_label} & \\texttt{{{controller.replace("_", "-")}}} & Python & {wall_time_avg:.2f} & {step_time_avg:.6f} & {position_error_avg:.4f} \\\\")
                 elif simulator == "jax":
-                    print(f"        & & Jax & {wall_time_avg:.2f} & {step_time_avg:.6f} & {waypoint_error_avg:.4f} \\\\")
+                    print(f"        & & Jax & {wall_time_avg:.2f} & {step_time_avg:.6f} & {position_error_avg:.4f} \\\\")
     
     print(r"    \hline")
     print(r"\end{tabular}")

@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
-from jaxopt import BoxCDQP
-# jax.config.update("jax_enable_x64", True)
+from jaxopt import OSQP
+jax.config.update("jax_enable_x64", True)
 
 def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_vel_limit=12.5, base_length=0.105, wheel_radius=0.016,
     projection_distance=0.05, gamma=150, safety_radius=0.12):
@@ -48,7 +48,7 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
         disturb = jnp.array([[-d, -d, d, d],[-d, d, d, -d]])
         
         # initialize QP Solver
-        qp_solver = BoxCDQP(tol=1e-2, maxiter=50)
+        qp_solver = OSQP(tol=1e-2, maxiter=50)
 
         num_robots = dxu.shape[1]
         num_obstacles = obstacles.shape[1] if obstacles else 0
@@ -57,7 +57,6 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
 
         # x,y components of the orientation of the robots
         Os = jnp.vstack([jnp.cos(x[2, :]), jnp.sin(x[2, :])])
-        # print(Os)
 
         # position of the safety bubble in front of the robot (projected position)
         ps = x[0:2, :] + projection_distance * Os
@@ -132,8 +131,8 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
         c = 2 * (v_hat.T @ L_all.T @ L_all)
 
         # solve QP
-        qp_solution = qp_solver.run(v_hat.squeeze(), params_obj=(Q, -c.squeeze()), params_ineq=(b.squeeze(), jnp.full(b.squeeze().shape, jnp.inf)))
-        vnew = qp_solution.params
+        qp_solution = qp_solver.run(params_obj=(Q, -c.squeeze()), params_ineq=(-A[:, 0:2*num_robots], -b.squeeze()))
+        vnew = qp_solution.params.primal
         dxu_new = D @ vnew.reshape((2, num_robots), order='F')
 
         return dxu_new

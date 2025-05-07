@@ -18,7 +18,9 @@ import random
 import time
 import timeit
 import os
-
+from matplotlib import pyplot as plt
+import seaborn as sns
+import pandas as pd
 np.random.seed(0)
 random.seed(0)
 
@@ -27,11 +29,11 @@ POSITION_THRESHOLD = 0.01
 ANGLE_THRESHOLD = 0.05
 SAFETY_RADIUS = 0.2
 CONTROLLERS = ['clf_uni_position', 'clf_uni_pose']
-BARRIERS = [None, 'robust']
+BARRIERS = [None]
 SIMULATORS = ['python', 'jax']
-NUM_ENVS = [1, 5, 10]
+NUM_ENVS = [1, 5, 10, 25, 50, 100]
 NUM_AGENTS = 4
-NUM_TIMESTEPS = 10_000
+NUM_TIMESTEPS = 100_000
 NUM_TRIALS = 30
 WAYPOINTS_PER_AGENT = 50
 
@@ -461,16 +463,87 @@ def print_results_table(results):
     
     print(r"    \hline")
     print(r"\end{tabular}")
-    
+
+def plot_wall_time_with_errorbars(results):
+    """
+    Plots the mean wall time with standard error bars (not shaded) for RPS (python) and RPS-Jax (jax)
+    across number of environments using seaborn + matplotlib.
+    """
+    simulators = ['python', 'jax']
+    simulator_labels = {'python': 'RPS', 'jax': 'Jax-RPS'}
+
+    # Prepare data
+    plot_data = []
+    for sim in simulators:
+        for num_env in NUM_ENVS:
+            filtered = [r for r in results if r['simulator'] == sim and r['num_envs'] == num_env]
+            wall_times = [r['wall_time'] * 1000 for r in filtered]  # ms
+
+            if wall_times:
+                mean = np.mean(wall_times)
+                std = np.std(wall_times)
+                plot_data.append({
+                    'Simulator': simulator_labels[sim],
+                    'Number of Environments': num_env,
+                    'Mean Wall Time (ms)': mean,
+                    'Std Wall Time (ms)': std,
+                })
+
+    df = pd.DataFrame(plot_data)
+
+    # Plot
+    plt.rcParams['font.size'] = 24
+    plt.figure(figsize=(8, 6))
+
+    # # Scatter plot the means
+    # sns.scatterplot(
+    #     data=df,
+    #     x='Number of Environments',
+    #     y='Mean Wall Time (ms)',
+    #     hue='Simulator',
+    #     style='Simulator',
+    #     s=100,  # marker size
+    # )
+
+    # Add error bars manually
+    palette = sns.color_palette()
+    for idx, sim in enumerate(df['Simulator'].unique()):
+        sub_df = df[df['Simulator'] == sim]
+        plt.plot(
+            sub_df['Number of Environments'],
+            sub_df['Mean Wall Time (ms)'],
+            linestyle='-',
+            linewidth=2,
+            label=sim,
+            color="#FF6365" if 'jax' in sim.lower() else palette[idx],
+        )
+        plt.errorbar(
+            sub_df['Number of Environments'],
+            sub_df['Mean Wall Time (ms)'],
+            yerr=sub_df['Std Wall Time (ms)'],
+            fmt='none',  # no connecting line
+            capsize=5,
+            elinewidth=2,
+            label=None,
+            color="#FF6365" if 'jax' in sim.lower() else palette[idx],
+        )
+
+    plt.title('Simulator Parallelization')
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel('Number of Environments')
+    plt.ylabel('Wall Time (ms)')
+    plt.tight_layout()
+    plt.legend()
+    plt.show()
 
 if __name__ == "__main__":
     # run_experiment()
-    # Load results from file or use directly if already available
     with open('jax_sim_parallel_results.pkl', 'rb') as f:
         results = pickle.load(f)
 
-    # Print the summary table
     print_results_table_human_readable(results)
-
-    # print the LaTeX table
     print_results_table(results)
+
+    # Add this to plot
+    plot_wall_time_with_errorbars(results)

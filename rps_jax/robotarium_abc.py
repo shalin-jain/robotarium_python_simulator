@@ -129,7 +129,7 @@ class RobotariumABC(ABC):
         boundary_violations = jnp.sum(boundary_violations)
 
         # Pairwise distance computation for collision checking
-        distances = jnp.sqrt(jnp.sum((p[:, :, None] - p[:, None, :])**2, axis=0))
+        distances = jnp.sqrt(jnp.sum((p[:2, :, None] - p[:2, None, :])**2, axis=0))
         collision_matrix = distances < self.collision_diameter
         collision_violations = jnp.sum(collision_matrix) - N  # Subtract N to remove self-collisions
 
