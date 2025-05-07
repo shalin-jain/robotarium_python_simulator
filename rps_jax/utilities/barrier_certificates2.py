@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from jaxopt import OSQP
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_vel_limit=12.5, base_length=0.105, wheel_radius=0.016,
     projection_distance=0.05, gamma=150, safety_radius=0.12):
@@ -48,7 +48,7 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
         disturb = jnp.array([[-d, -d, d, d],[-d, d, d, -d]])
         
         # initialize QP Solver
-        qp_solver = OSQP(tol=1e-2, maxiter=50)
+        qp_solver = OSQP(tol=1e-4, maxiter=100)
 
         num_robots = dxu.shape[1]
         num_obstacles = obstacles.shape[1] if obstacles else 0
