@@ -48,7 +48,7 @@ def create_robust_barriers(max_num_obstacles=100, max_num_robots=30, d=5, wheel_
         disturb = jnp.array([[-d, -d, d, d],[-d, d, d, -d]])
         
         # initialize QP Solver
-        qp_solver = OSQP(tol=1e-4, maxiter=100)
+        qp_solver = OSQP(tol=1e-6, maxiter=100)
 
         num_robots = dxu.shape[1]
         num_obstacles = obstacles.shape[1] if obstacles else 0
